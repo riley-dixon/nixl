@@ -164,22 +164,29 @@ absl_strings_dep = dependency('absl_strings', required: false)
 absl_synchronization_dep = dependency('absl_synchronization', required: false)
 absl_time_dep = dependency('absl_time', required: false)
 
-if absl_base_dep.found() and not absl_log_dep.found()
-  error('Your Abseil version is too old: found absl_base but missing support for absl_log. ' +
-        'Cannot fallback to subproject because that would result in a mix of Abseil versions at runtime. ' +
-        'Please install a recent Abseil from source on your system and remove old libabsl & libabsl-dev packages.')
+# True only when every piece is available from the system pkg-config stack.
+have_full_system_absl = (
+    absl_log_dep.found() and
+    absl_log_initialize_dep.found() and
+    absl_flat_hash_map_dep.found() and
+    absl_status_dep.found() and
+    absl_statusor_dep.found() and
+    absl_strings_dep.found() and
+    absl_synchronization_dep.found() and
+    absl_time_dep.found())
+
+# Ubuntu/jammy-style installs often ship absl_base without absl_log. We must
+# not link a mix of system and subproject Abseil; use the bundled subproject
+# for *all* Abseil components (including absl_base) when the system set is
+# incomplete.
+if absl_base_dep.found() and not have_full_system_absl
+  message('System Abseil is incomplete (e.g. absl_base without absl_log). Using abseil-cpp subproject for all Abseil components.')
 endif
 
-if not (absl_log_dep.found() and
-        absl_log_initialize_dep.found() and
-        absl_flat_hash_map_dep.found() and
-        absl_status_dep.found() and
-        absl_statusor_dep.found() and
-        absl_strings_dep.found() and
-        absl_synchronization_dep.found() and
-        absl_time_dep.found())
+if not have_full_system_absl
   message('System Abseil missing required components; using subproject fallback')
   abseil_proj = subproject('abseil-cpp')
+  absl_base_dep = abseil_proj.get_variable('absl_base_dep')
   absl_log_dep = abseil_proj.get_variable('absl_log_dep')
   absl_log_initialize_dep = absl_log_dep
   absl_flat_hash_map_dep = abseil_proj.get_variable('absl_container_dep')
@@ -369,8 +376,14 @@ if wheel_variant != ''
     cuda_wheel_dir = 'nixl_' + wheel_variant
 endif
 
-# Check for etcd-cpp-api - use multiple methods for discovery
-etcd_dep = dependency('etcd-cpp-api', required : false)
+# Debian/Ubuntu libetcd-cpp-apiv3-dev usually installs CMake package etcd-cpp-api
+# but no etcd-cpp-api.pc, so probing pkg-config first always fails there. Try
+# CMake first; fall back to pkg-config for installs that only ship a .pc file.
+# (Meson may still warn about -Wl,--push-state tokens when using CMake; harmless.)
+etcd_dep = dependency('etcd-cpp-api', required : false, method : 'cmake')
+if not etcd_dep.found()
+  etcd_dep = dependency('etcd-cpp-api', required : false, method : 'pkg-config')
+endif
 etcd_inc_path = get_option('etcd_inc_path')
 etcd_lib_path = get_option('etcd_lib_path')
 if not etcd_dep.found() and etcd_lib_path != ''

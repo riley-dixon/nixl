@@ -168,8 +168,11 @@ endif
 # OpenMP
 openmp_dep = dependency('openmp', required: true)
 
-# Check for etcd-cpp-api - use multiple methods for discovery
-etcd_dep = dependency('etcd-cpp-api', required : false)
+# Try CMake before pkg-config (see root meson.build: matches Debian etcd dev).
+etcd_dep = dependency('etcd-cpp-api', required : false, method : 'cmake')
+if not etcd_dep.found()
+  etcd_dep = dependency('etcd-cpp-api', required : false, method : 'pkg-config')
+endif
 
 # GFlags
 gflags_dep = dependency('gflags', required: true)
@@ -324,6 +327,8 @@ else
         link_with: [nixlbench_runtimes, utils_lib, worker_libs],
         dependencies: deps,
         link_args: args,
+        build_rpath: nixl_lib_path,
+        install_rpath: nixl_lib_path,
         install: true,
         install_dir: get_option('bindir'))
 endif
