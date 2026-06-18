@@ -57,37 +57,9 @@ if not nixl_lib.found() or not nixl_build.found() or not nixl_serdes.found()
     error('NIXL Libraries not found. Exiting.')
 endif
 
-# ROCm (mutually exclusive with CUDA; default off)
-rocm_available = false
-use_rocm = get_option('use_rocm')
-if use_rocm
-    rocm_path = get_option('rocm_path')
-    if rocm_path == ''
-        rocm_path = '/opt/rocm'
-    endif
-    if not fs.exists(rocm_path)
-        error('use_rocm=true but ROCm install root not found at ' + rocm_path +
-              '. Set -Drocm_path=<prefix> to the correct ROCm install root.')
-    endif
-    rocm_lib_path = rocm_path + '/lib'
-    rocm_inc_path = rocm_path + '/include'
-    rocm_dep = declare_dependency(
-        link_args : ['-L' + rocm_lib_path, '-lamdhip64', '-lhiprtc'],
-        include_directories : include_directories(rocm_inc_path))
-    add_project_arguments('-D__HIP_PLATFORM_AMD__', '-Wno-deprecated-declarations',
-                          language: 'cpp')
-    if rocm_dep.found()
-        rocm_available = true
-    endif
-endif
-
-# CUDA (skipped when use_rocm=true)
+# CUDA (always probed; independent of ROCm)
 cuda_available = false
-if use_rocm
-    # Placeholder dep so unconditional references to cuda_dep don't error;
-    # cuda_available=false gates real use.
-    cuda_dep = declare_dependency()
-elif cuda_lib_path == ''
+if cuda_lib_path == ''
     cuda_dep = dependency('cuda', required : false, modules : [ 'cudart', 'cuda' ])
     if not cuda_dep.found()
         # Meson is not detecting CUDA reliably on ARM, fallback to default
@@ -122,6 +94,69 @@ else
         include_directories : include_directories(cuda_inc_path))
     cuda_available = true
 endif
+
+cuda_detected = cuda_available
+
+# ROCm / HIP (optional auto-detect; use_rocm=true makes HIP mandatory)
+rocm_available = false
+rocm_dep = declare_dependency()
+want_rocm = get_option('use_rocm')
+rocm_path = get_option('rocm_path')
+if rocm_path == ''
+    rocm_path = '/opt/rocm'
+endif
+rocm_lib_path = rocm_path + '/lib'
+rocm_inc_path = rocm_path + '/include'
+rocm_inc = include_directories(rocm_inc_path)
+amdhip64_lib = cpp.find_library('amdhip64', dirs: [rocm_lib_path], required: false)
+if amdhip64_lib.found() and cpp.has_header('hip/hip_runtime.h', include_directories: rocm_inc)
+    rocm_dep = declare_dependency(
+        link_args : ['-L' + rocm_lib_path, '-lamdhip64', '-lhiprtc'],
+        include_directories : rocm_inc)
+    rocm_available = true
+elif want_rocm
+    error('use_rocm=true but ROCm HIP was not found under ' + rocm_path +
+          '. Set -Drocm_path=<prefix> to the correct ROCm install root.')
+endif
+
+rocm_detected = rocm_available
+
+# One translation unit cannot include CUDA and HIP headers together. Use
+# nixlbench_gpu=cuda vs nixlbench_gpu=rocm for two separate Meson builds.
+gpu_flavor = get_option('nixlbench_gpu')
+if gpu_flavor == 'cuda'
+    cuda_available = cuda_detected
+    rocm_bench = false
+elif gpu_flavor == 'rocm'
+    cuda_available = false
+    rocm_bench = rocm_detected
+else
+    cuda_available = cuda_detected
+    rocm_bench = rocm_detected
+endif
+nixlbench_rocm_enabled = rocm_bench and not cuda_available
+
+if gpu_flavor == 'cuda' and not cuda_detected
+    error('nixlbench_gpu=cuda was set but CUDA was not found.')
+endif
+if gpu_flavor == 'rocm' and not rocm_detected
+    error('nixlbench_gpu=rocm was set but ROCm HIP was not found under ' + rocm_path + '.')
+endif
+
+if nixlbench_rocm_enabled
+    add_project_arguments('-D__HIP_PLATFORM_AMD__', '-Wno-deprecated-declarations',
+                          language: 'cpp')
+endif
+
+if cuda_detected and rocm_detected and gpu_flavor == 'auto'
+    message(
+        'CUDA and ROCm both found: default nixlbench build uses CUDA only. ' +
+        'For a HIP binary as well, run a second Meson configure in another ' +
+        'build directory with -Dnixlbench_gpu=rocm (see .gitlab/build.sh).',
+    )
+endif
+
+bench_exe = (gpu_flavor == 'rocm' and cuda_detected) ? 'nixlbench-rocm' : 'nixlbench'
 
 cuda_fabric_available = false
 if cuda_available
@@ -160,7 +195,7 @@ nvshmem_inc = nvshmem_inc_path
 inc_dir = include_directories('.', './src/', nixl_inc)
 
 nvshmem_available = false
-if nvshmem_lib_path != ''
+if nvshmem_lib_path != '' and cuda_available
     if cpp.has_header('nvshmem.h', include_directories: include_directories(nvshmem_inc))
         nvshmem_lib = cpp.find_library('nvshmem', dirs: [nvshmem_lib_path])
         nvshmem_host_lib = cpp.find_library('nvshmem_host', dirs: [nvshmem_lib_path])
@@ -177,7 +212,7 @@ if cuda_available
     add_project_arguments('-DHAVE_CUDA', language: 'cpp')
 endif
 
-if rocm_available
+if nixlbench_rocm_enabled
     add_project_arguments('-DHAVE_ROCM', language: 'cpp')
 endif
 
@@ -185,8 +220,8 @@ if cuda_fabric_available
     add_project_arguments('-DHAVE_CUDA_FABRIC', language: 'cpp')
 endif
 
-if not cuda_available and not rocm_available
-    warning('Neither CUDA nor ROCm found. VRAM support will be disabled.')
+if not cuda_available and not nixlbench_rocm_enabled
+    warning('Neither CUDA nor ROCm is enabled for this nixlbench build. VRAM support will be disabled.')
 endif
 
 # Subprojects
@@ -201,7 +236,7 @@ configure_file(
         'HAVE_ETCD': etcd_available ? '1' : '0',
         'HAVE_NVSHMEM': nvshmem_available ? '1' : '0',
         'HAVE_CUDA': cuda_available ? '1' : '0',
-        'HAVE_ROCM': rocm_available ? '1' : '0',
+        'HAVE_ROCM': nixlbench_rocm_enabled ? '1' : '0',
         'HAVE_CUDA_FABRIC': cuda_fabric_available ? '1' : '0',
     },
     install: true,
@@ -215,7 +250,8 @@ if etcd_available
 endif
 if cuda_available
     deps += [cuda_dep]
-elif rocm_available
+endif
+if nixlbench_rocm_enabled
     deps += [rocm_dep]
 endif
 if nvshmem_available
@@ -271,20 +307,23 @@ if nvshmem_available
     nvcc_command = [nvcc, nvcc_args, '-o', '@OUTPUT@', '@INPUT@']
     nvcc_command += nvcc_cmd_files
 
-    custom_target('nixlbench',
+    custom_target(
+        bench_exe,
         input: 'src/main.cpp',
-        output: 'nixlbench',
+        output: bench_exe,
         command: nvcc_command,
         build_by_default: true,
         install: true,
         install_dir: get_option('bindir'),
         depends: [nixlbench_runtimes, utils_lib, worker_libs])
 else
-    executable('nixlbench', 'src/main.cpp',
-                include_directories: inc_dir,
-                link_with: [nixlbench_runtimes, utils_lib, worker_libs],
-                dependencies: deps,
-                link_args: args,
-                install: true,
-                install_dir: get_option('bindir'))
+    executable(
+        bench_exe,
+        'src/main.cpp',
+        include_directories: inc_dir,
+        link_with: [nixlbench_runtimes, utils_lib, worker_libs],
+        dependencies: deps,
+        link_args: args,
+        install: true,
+        install_dir: get_option('bindir'))
 endif

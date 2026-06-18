@@ -30,7 +30,8 @@ utils_deps = [
 
 if cuda_available
   utils_deps += [cuda_dep]
-elif rocm_available
+endif
+if nixlbench_rocm_enabled
   utils_deps += [rocm_dep]
 endif
 
