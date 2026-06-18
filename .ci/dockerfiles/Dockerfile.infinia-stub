@@ -1,0 +1,9 @@
+# Minimal stand-in for harbor.mellanox.com/nixl/infinia-libs when that image
+# cannot be pulled.
+#
+# Build:
+#   docker build -f .ci/dockerfiles/Dockerfile.infinia-stub -t infinia-libs:stub .
+#
+
+FROM alpine:3.21
+RUN mkdir -p /infinia/x86_64 /infinia/aarch64

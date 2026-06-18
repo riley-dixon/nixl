@@ -92,6 +92,16 @@ else
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:/usr/local/cuda/compat:/usr/local/cuda/compat/lib.real:$LD_LIBRARY_PATH
 fi
 
+# ROCm + hipFile: Dockerfile.base copies /opt/rocm from ROCM_IMAGE; build.sh
+# dependency install builds rocm-systems hipfile into that prefix on x86_64.
+UCX_ROCM_BUILD_ARGS=""
+if [ -d "/opt/rocm/lib" ] && ls /opt/rocm/lib/libamdhip64.so* >/dev/null 2>&1; then
+    export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+    UCX_ROCM_BUILD_ARGS="--with-rocm=${ROCM_PATH}"
+    export LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+fi
+export UCX_ROCM_BUILD_ARGS="${UCX_ROCM_BUILD_ARGS:-}"
+
 # Default to false, unless TEST_LIBFABRIC is set. AWS EFA tests must set it to true.
 export TEST_LIBFABRIC=${TEST_LIBFABRIC:-false}
 
