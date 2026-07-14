@@ -13,7 +13,6 @@
 #   UBUNTU_MINOR_VERSION   used to pick the ROCm repo (ubuntu2404)  (default: 04)
 #   ROCM_VERSION           ROCm release to install            (default: 7.14.0)
 #
-# Build context must be the repo root (the COPY below expects AMDRootCA.crt).
 # Tag the image to match ROCM_VERSION so Dockerfile.rocm can pin the base it uses.
 
 ARG UBUNTU_CODENAME=noble
@@ -61,7 +60,9 @@ RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
         "${ROCM_MAJOR}" "${ROCM_MINOR}" "new" "${ROCM_INSTALL_PATH}" \
         > /etc/rocm-build.env
 RUN . /etc/rocm-build.env && \
-    echo "deb [arch=amd64 trusted=yes] https://rocm.prereleases.amd.com/packages-multi-arch/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
+    wget https://rocm.prereleases.amd.com/packages/gpg/rocm.gpg -O - | \
+    gpg --dearmor > /etc/apt/keyrings/amdrocm.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://rocm.prereleases.amd.com/packages-multi-arch/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
         > /etc/apt/sources.list.d/amdrocm-prerelease.list
 
 RUN . /etc/rocm-build.env && \

@@ -76,6 +76,8 @@ fi
 ARCH=$(uname -m)
 [ "$ARCH" = "arm64" ] && ARCH="aarch64"
 
+LIBFABRIC_INSTALL_DIR=${LIBFABRIC_INSTALL_DIR:-$INSTALL_DIR}
+
 export LD_LIBRARY_PATH="${INSTALL_DIR}/lib:${INSTALL_DIR}/lib/$ARCH-linux-gnu:${INSTALL_DIR}/lib64:$LD_LIBRARY_PATH:${LIBFABRIC_INSTALL_DIR}/lib"
 export CPATH="${INSTALL_DIR}/include:${LIBFABRIC_INSTALL_DIR}/include:$CPATH"
 export PATH="${INSTALL_DIR}/bin:$HOME/.local/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"
@@ -217,7 +219,6 @@ else
     npm install -g azurite@${AZURITE_VER}
 # Libfabric
     LIBFABRIC_VERSION=${LIBFABRIC_VERSION:-v1.21.0}
-    LIBFABRIC_INSTALL_DIR=${LIBFABRIC_INSTALL_DIR:-$INSTALL_DIR}
     wget --tries=3 --waitretry=5 -O "${TMPDIR}/libfabric-${LIBFABRIC_VERSION#v}.tar.bz2" "https://github.com/ofiwg/libfabric/releases/download/${LIBFABRIC_VERSION}/libfabric-${LIBFABRIC_VERSION#v}.tar.bz2"
     tar xjf "${TMPDIR}/libfabric-${LIBFABRIC_VERSION#v}.tar.bz2" -C ${TMPDIR}
     rm "${TMPDIR}/libfabric-${LIBFABRIC_VERSION#v}.tar.bz2"
@@ -376,7 +377,6 @@ fi # PRE_INSTALLED_ENV
 if [ -n "$PRE_INSTALLED_UCX_ENV" ]; then
     echo "PRE_INSTALLED_UCX_ENV is set, skipping UCX compilation"
 else
-    UCCL_COMMIT_SHA="0cdb740cf369a4f4dd63b9b773c8937f187b179a"
     # UCCL is skipped if no Nvidia GPU is present.
     # Skipping steps entirely for ROCm.
     UCX_VERSION=${UCX_VERSION:-v1.21.x}

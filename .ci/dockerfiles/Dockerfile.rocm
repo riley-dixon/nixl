@@ -467,7 +467,8 @@ RUN set -eux; \
 FROM ${BUILDER_BASE_IMAGE} AS ucx-build
 ARG NIXL_INSTALL_DIR=/opt/nixl
 ARG UCX_VERSION=v1.21.x
-RUN set -eux; \
+RUN . /etc/rocm-build.env; \
+    set -eux; \
     NPROC=$(nproc); \
     UCX_INSTALL_DIR="${NIXL_INSTALL_DIR}"; \
     cd /tmp; \
@@ -482,6 +483,7 @@ RUN set -eux; \
         --enable-optimizations \
         --enable-cma \
         --enable-devel-headers \
+        --with-rocm="${ROCM_INSTALL_PATH}" \
         --with-verbs \
         --with-dm \
         --without-gdrcopy; \
@@ -555,7 +557,7 @@ ARG NIXL_INSTALL_DIR=/opt/nixl
 RUN if ! getent group "${_GID}" > /dev/null 2>&1; then \
         groupadd -g "${_GID}" "${_GROUP}"; \
     fi && \
-    useradd -u "${_UID}" -g "${_GID}" -m -s /bin/bash "${_LOGIN}" && \
+    useradd -l -u "${_UID}" -g "${_GID}" -m -s /bin/bash "${_LOGIN}" && \
     mkdir -p "${_HOME}" && \
     chown -R "${_UID}":"${_GID}" "${_HOME}" && \
     mkdir -p /etc/sudoers.d && \
