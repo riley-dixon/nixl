@@ -1,9 +1,15 @@
+# SPDX-FileCopyrightText: Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 name: Sync Tags from Upstream
 
 on:
   schedule:
     - cron: '0 * * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   sync-tags:
