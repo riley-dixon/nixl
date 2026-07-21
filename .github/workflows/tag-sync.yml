@@ -1,42 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: Sync Tags from Upstream
+name: Sync Branch from Upstream
 
 on:
   schedule:
     - cron: '0 * * * *'
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to sync from upstream'
+        required: false
+        default: 'main'
 
 permissions:
   contents: write
 
 jobs:
-  sync-tags:
-    name: Sync tags from upstream
+  sync-branch:
+    name: Sync branch from upstream
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        with:
-          app-id: ${{ secrets.TAG_SYNC_APP_ID }}
-          private-key: ${{ secrets.TAG_SYNC_APP_PRIVATE_KEY }}
-
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 1
-          fetch-tags: true
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Add upstream remote
-        run: git remote add upstream https://github.com/ai-dynamo/nixl.git
-
-      - name: Fetch tags from upstream
-        run: git fetch upstream --tags
-
-      - name: Push tags to origin
-        run: git push origin --tags
+      - name: Sync branch from upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh repo sync "${GITHUB_REPOSITORY}" --branch "${{ inputs.branch || 'main' }}"
