@@ -199,7 +199,7 @@ nixlAisEngine::prepXfer(const nixl_xfer_op_t &operation,
                                   (size_t)file_desc.addr,
                                   file_handle->hip_fhandle,
                                   (operation == NIXL_READ) ? hipFileBatchRead : hipFileBatchWrite,
-                                  mem_desc.devId});
+                                  static_cast<int>(mem_desc.devId)});
     }
 
     if (reqs.empty()) {
