@@ -3,19 +3,15 @@
 # CI/CD pipeline build container with full user setup and sudo access.
 #
 # Usage:
-#   docker build -f .ci/dockerfiles/Dockerfile.base -t nixl-ci .
+#   docker build -f .ci/dockerfiles/Dockerfile.ci -t nixl-ci .
 #
 
 ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:26.06-py3
 ARG INFINIA_LIBS_IMAGE=harbor.mellanox.com/nixl/infinia-libs:v2.4.0-beta.1
-ARG ROCM_IMAGE=docker.io/rocm/dev-ubuntu-24.04:7.2
 
 # Stage that just holds the pre-fetched DDN Infinia libraries.
 # See .ci/dockerfiles/Dockerfile.infinia-libs for how this image is produced.
 FROM ${INFINIA_LIBS_IMAGE} AS infinia
-
-# Stage that just holds the pre-fetched ROCm toolchain.
-FROM ${ROCM_IMAGE} AS rocm
 
 FROM ${BASE_IMAGE}
 
@@ -49,11 +45,6 @@ RUN apt-get update && \
 ARG INFINIA_DEST=/opt/ddn/red
 COPY --from=infinia /infinia/${ARCH}/ ${INFINIA_DEST}/
 
-# Copy the ROCm toolchain from the ROCM_IMAGE
-COPY --from=rocm /opt/rocm /opt/rocm
-RUN ldconfig || true
-ENV ROCM_PATH=/opt/rocm
-
 # Create group and user in one RUN command to reduce layers
 RUN if ! getent group "${_GID}" > /dev/null 2>&1; then \
     groupadd -g "${_GID}" "${_GROUP}"; \
@@ -80,7 +71,7 @@ ENV HOME=${_HOME}
 ENV USER=${_LOGIN}
 
 RUN /.gitlab/build.sh ${NIXL_INSTALL_DIR}
-RUN sudo rm -rf /.gitlab/build.sh /.ci/scripts
+RUN sudo rm -rf /.gitlab/build.sh /.ci/scripts/
 
 # Set working directory
 WORKDIR ${_HOME}

@@ -26,20 +26,8 @@ set -o pipefail
 INSTALL_DIR=$1
 UCX_INSTALL_DIR=$2
 EXTRA_BUILD_ARGS=${3:-""}
-if [ -z "${NIXL_BUILD_DIR:-}" ]; then
-    if [ -w "${PWD:-.}" ] 2>/dev/null; then
-        NIXL_BUILD_DIR=nixl_build
-    else
-        NIXL_BUILD_DIR="${HOME}/nixl_build"
-    fi
-fi
-if [ -z "${NIXLBENCH_BUILD_DIR:-}" ]; then
-    if [ -w "${PWD:-.}" ] 2>/dev/null; then
-        NIXLBENCH_BUILD_DIR=nixlbench_build
-    else
-        NIXLBENCH_BUILD_DIR="${HOME}/nixlbench_build"
-    fi
-fi
+NIXL_BUILD_DIR=${NIXL_BUILD_DIR:-nixl_build}
+NIXLBENCH_BUILD_DIR=${NIXLBENCH_BUILD_DIR:-nixlbench_build}
 # UCX_VERSION is the version of UCX to build override default with env variable.
 UCX_VERSION=${UCX_VERSION:-v1.22.x}
 # LIBFABRIC_VERSION is the version of libfabric to build override default with env variable.
@@ -157,41 +145,8 @@ else
                                  hwloc \
                                  libhwloc-dev \
                                  libxml2-dev \
-                                 libcurl4-openssl-dev zlib1g-dev gnupg libmount-dev # aws-sdk-cpp dependencies
+                                 libcurl4-openssl-dev zlib1g-dev # aws-sdk-cpp dependencies
     $SUDO apt-mark hold liburing2 liburing-dev
-
-    ROCSYSTEMS_REF=${ROCSYSTEMS_REF:-develop}
-    SKIP_ROCM_HIPFILE=${SKIP_ROCM_HIPFILE:-0}
-    if [ "${ARCH}" = "aarch64" ]; then
-        echo "aarch64: ensure /opt/rocm stub layout for hipfile skip"
-        $SUDO mkdir -p /opt/rocm/lib /opt/rocm/include
-    elif [ "${SKIP_ROCM_HIPFILE}" = "1" ]; then
-        echo "SKIP_ROCM_HIPFILE=1: skipping rocm-systems hipfile build"
-    else
-        (
-            cd "${TMPDIR}" || exit 1
-            rm -rf rocm-systems
-            git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git rocm-systems
-            cd rocm-systems || exit 1
-            git sparse-checkout init --cone
-            git sparse-checkout set projects/hipfile
-            git fetch --depth 1 origin "${ROCSYSTEMS_REF}"
-            git checkout FETCH_HEAD
-
-            mkdir -p projects/hipfile/build
-            cd projects/hipfile/build || exit 1
-            export PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}"
-            cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-                -DCMAKE_C_COMPILER=amdclang \
-                -DCMAKE_CXX_COMPILER=amdclang++ \
-                -DAIS_CXX_STANDARD=20 \
-                -DBUILD_TESTING=OFF \
-                ..
-            cmake --build . --parallel
-            $SUDO cmake --install .
-            $SUDO ldconfig
-        )
-    fi
 
     # Ubuntu 22.04 specific setup
     if grep -q "Ubuntu 22.04" /etc/os-release 2>/dev/null; then
@@ -385,7 +340,7 @@ else
       echo "MOONCAKE_VERSION: ${MOONCAKE_VERSION}" && \
       git clone --depth 1 --branch "${MOONCAKE_VERSION}" https://github.com/kvcache-ai/Mooncake.git && \
       cd Mooncake && \
-      sed -i '/liburing-dev/d' dependencies.sh && \
+      sed -i '/liburing-dev/d' dependencies.sh
       $SUDO bash dependencies.sh -y && \
       mkdir build && cd build && \
       cmake .. -DBUILD_SHARED_LIBS=ON -DWITH_STORE=OFF -G Ninja && \
@@ -423,6 +378,7 @@ else
       $SUDO cmake --install sdk/identity
     )
 fi # PRE_INSTALLED_ENV end
+
 if [ -n "$PRE_INSTALLED_UCX_ENV" ]; then
     echo "PRE_INSTALLED_UCX_ENV is set, skipping UCX compilation"
 else
@@ -455,7 +411,7 @@ else
             --with-verbs \
             --with-dm \
             --without-gdrcopy \
-            ${UCX_CUDA_BUILD_ARGS} ${UCX_ROCM_BUILD_ARGS} && \
+            ${UCX_CUDA_BUILD_ARGS} && \
           make -j"$NPROC" && \
           $SUDO make -j install-strip && \
           $SUDO ldconfig \
@@ -474,8 +430,6 @@ else
     if [ "${BUILD_NIXL_EP}" = "true" ]; then
         EXTRA_BUILD_ARGS="${EXTRA_BUILD_ARGS} -Dbuild_nixl_ep=true"
     fi
-    # NIXL Meson enables CUDA-backed plugins when CUDA is found; UCX is built with
-    # CUDA and/or ROCm flags when the respective SDKs are present (see common.sh).
     # shellcheck disable=SC2086
     meson setup ${NIXL_BUILD_DIR} --prefix=${INSTALL_DIR} -Ducx_path=${UCX_INSTALL_DIR} -Dbuild_docs=true -Drust=false ${EXTRA_BUILD_ARGS} -Dlibfabric_path="${LIBFABRIC_INSTALL_DIR}" --buildtype=debug
     ninja -j"$NPROC" -C ${NIXL_BUILD_DIR} && ninja -j"$NPROC" -C ${NIXL_BUILD_DIR} install
@@ -484,42 +438,7 @@ else
     # TODO(kapila): Copy the nixl.pc file to the install directory if needed.
     # cp ${BUILD_DIR}/nixl.pc ${INSTALL_DIR}/lib/pkgconfig/nixl.pc
 
-    # nixlbench: CUDA and ROCm are probed independently. A single Meson tree cannot
-    # compile CUDA and HIP headers in the same TU; use -Dnixlbench_gpu=cuda or rocm.
-    # When both SDKs are present, run two configures (see NIXLBENCH_DUAL_BUILDS).
     cd benchmark/nixlbench
-    NIXLBENCH_MESON_EXTRA=()
-    _ROCM_ROOT="${ROCM_PATH:-/opt/rocm}"
-    if ls "${_ROCM_ROOT}/lib"/libamdhip64.so* >/dev/null 2>&1; then
-        NIXLBENCH_MESON_EXTRA+=(-Drocm_path="${_ROCM_ROOT}")
-    fi
-
-    _have_cuda=0
-    if [ -n "${CUDA_HOME:-}" ] && [ -f "${CUDA_HOME}/include/cuda_runtime.h" ]; then
-        _have_cuda=1
-    elif [ -f /usr/local/cuda/include/cuda_runtime.h ]; then
-        _have_cuda=1
-    fi
-    _have_rocm=0
-    if ls "${_ROCM_ROOT}/lib"/libamdhip64.so* >/dev/null 2>&1; then
-        _have_rocm=1
-    fi
-
-    _nb_dual="${NIXLBENCH_DUAL_BUILDS:-1}"
-    if [ "${_nb_dual}" = 1 ] && [ "${_have_cuda}" = 1 ] && [ "${_have_rocm}" = 1 ]; then
-        echo "nixlbench: CUDA and ROCm detected; building cuda and rocm variants (set NIXLBENCH_DUAL_BUILDS=0 for a single auto build)"
-        meson setup "${NIXLBENCH_BUILD_DIR}_cuda" -Dnixl_path="${INSTALL_DIR}" \
-            -Dprefix="${INSTALL_DIR}" -Dnixlbench_gpu=cuda "${NIXLBENCH_MESON_EXTRA[@]}"
-        ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}_cuda" &&
-            ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}_cuda" install
-        meson setup "${NIXLBENCH_BUILD_DIR}_rocm" -Dnixl_path="${INSTALL_DIR}" \
-            -Dprefix="${INSTALL_DIR}" -Dnixlbench_gpu=rocm "${NIXLBENCH_MESON_EXTRA[@]}"
-        ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}_rocm" &&
-            ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}_rocm" install
-    else
-        meson setup "${NIXLBENCH_BUILD_DIR}" -Dnixl_path="${INSTALL_DIR}" \
-            -Dprefix="${INSTALL_DIR}" "${NIXLBENCH_MESON_EXTRA[@]}"
-        ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}" &&
-            ninja -j"$NPROC" -C "${NIXLBENCH_BUILD_DIR}" install
-    fi
+    meson setup ${NIXLBENCH_BUILD_DIR} -Dnixl_path=${INSTALL_DIR} -Dprefix=${INSTALL_DIR}
+    ninja -j"$NPROC" -C ${NIXLBENCH_BUILD_DIR} && ninja -j"$NPROC" -C ${NIXLBENCH_BUILD_DIR} install
 fi
