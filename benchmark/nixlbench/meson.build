@@ -101,9 +101,13 @@ cuda_detected = cuda_available
 rocm_available = false
 rocm_dep = declare_dependency()
 want_rocm = get_option('use_rocm')
+# `rocm_path` names the ROCm install prefix. When unset it follows ROCM_PATH
+# from the environment. rocm_path could be a directory or symlink, so probe
+# for the library itself rather than trusting the directory to exist.
 rocm_path = get_option('rocm_path')
 if rocm_path == ''
-    rocm_path = '/opt/rocm'
+    rocm_path = run_command('bash', '-c', 'echo ${ROCM_PATH:-/opt/rocm}',
+                            check: true).stdout().strip()
 endif
 rocm_lib_path = rocm_path + '/lib'
 rocm_inc_path = rocm_path + '/include'
@@ -152,7 +156,7 @@ if cuda_detected and rocm_detected and gpu_flavor == 'auto'
     message(
         'CUDA and ROCm both found: default nixlbench build uses CUDA only. ' +
         'For a HIP binary as well, run a second Meson configure in another ' +
-        'build directory with -Dnixlbench_gpu=rocm (see .gitlab/build.sh).',
+        'build directory with -Dnixlbench_gpu=rocm (see .gitlab/build-rocm.sh).',
     )
 endif
 
