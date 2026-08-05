@@ -13,18 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ROCm detection (mutually exclusive with CUDA; default off)
-rocm_path = get_option('rocm_path')
-if rocm_path != ''
-    if not fs.exists(rocm_path)
-        error('rocm_path set but ROCm install root not found at ' + rocm_path +
-              '. Set -Drocm_path=<prefix> to the correct ROCm install root.')
-    endif
-    rocm_lib_path = rocm_path + '/lib'
-    rocm_inc_path = rocm_path + '/include'
+# Reuse the root project's HIP detection (rocm_path / $ROCM_PATH); hiprtc
+# is only needed by these tests, so it is added on top of hip_dep. ROCm and
+# CUDA stay mutually exclusive per test binary: a single translation unit
+# cannot carry both -DHAVE_ROCM and -DHAVE_CUDA (see cpp_args below).
+if hip_dep.found()
     rocm_dep = declare_dependency(
-        link_args : ['-L' + rocm_lib_path, '-lamdhip64', '-lhiprtc'],
-        include_directories : include_directories(rocm_inc_path))
+        dependencies : hip_dep,
+        link_args : ['-L' + rocm_path + '/lib', '-lhiprtc'])
 else
     rocm_dep = disabler()
 endif

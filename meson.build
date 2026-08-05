@@ -331,42 +331,35 @@ else
     cuda_wheel_dir = 'nixl_cu12'
 endif
 
-# --- ROCm / HIP detection (independent of CUDA; both stacks may coexist) ---
-hip_inc_path = get_option('hippath_inc')
-hip_lib_path = get_option('hippath_lib')
-hip_dep = disabler()
-
-if hip_lib_path != ''
-    message('HIP lib path: ' + hip_lib_path)
-    hip_dep = declare_dependency(
-        link_args : ['-L' + hip_lib_path, '-lamdhip64'],
-        include_directories : include_directories(hip_inc_path))
-else
-    rocm_home = run_command('bash', '-c', 'echo ${ROCM_PATH:-${ROCM_HOME:-/opt/rocm}}').stdout().strip()
-    if rocm_home == ''
-        rocm_home = '/opt/rocm'
-    endif
-    hip_lib = rocm_home + '/lib'
-    hip_inc = rocm_home + '/include'
-    if fs.exists(hip_lib) and fs.exists(hip_inc)
-        hip_dep = declare_dependency(
-            link_args : ['-L' + hip_lib, '-lamdhip64'],
-            include_directories : include_directories(hip_inc))
-        message('Found ROCm/HIP installation: ' + rocm_home)
-    endif
+# --- ROCm / HIP detection ---
+# `rocm_path` names the ROCm install prefix. When unset it follows ROCM_PATH
+# from the environment. rocm_path could be a directory or symlink, so probe
+# for the library itself rather than trusting the directory to exist.
+rocm_path = get_option('rocm_path')
+if rocm_path == ''
+    rocm_path = run_command('bash', '-c', 'echo ${ROCM_PATH:-/opt/rocm}',
+                            check: true).stdout().strip()
 endif
 
-if hip_dep.found()
-    add_project_arguments('-DHAVE_HIP', language: 'cpp')
+hip_dep = disabler()
+hip_lib_path = rocm_path + '/lib'
+hip_inc_path = rocm_path + '/include'
+hip_inc = include_directories(hip_inc_path)
+amdhip64_lib = cpp.find_library('amdhip64', dirs: [hip_lib_path], required: false)
+
+if amdhip64_lib.found() and cpp.has_header('hip/hip_runtime.h', include_directories : hip_inc)
+    hip_dep = declare_dependency(
+        link_args : ['-L' + hip_lib_path, '-lamdhip64',
+                     '-Wl,-rpath,' + hip_lib_path],
+        include_directories : hip_inc)
+    # hip_runtime.h and hipfile.h both require the platform macro.
     add_project_arguments('-D__HIP_PLATFORM_AMD__', language: 'cpp')
-    message('ROCm/HIP support enabled')
+    message('Found ROCm/HIP installation: ' + rocm_path)
 endif
 
 if cuda_dep.found() and hip_dep.found()
     message('CUDA and ROCm/HIP are both available; NVIDIA and AMD plugin stacks may be built together when enabled.')
 endif
-
-has_gpu = cuda_dep.found() or hip_dep.found()
 
 # Allow callers (e.g. ROCm CI/Dockerfile) to override the wheel variant suffix
 # without otherwise affecting the build. Non-empty value wins over the
