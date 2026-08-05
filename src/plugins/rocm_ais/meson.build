@@ -18,50 +18,24 @@
 # point plus its concrete engine subclass. Today the only name is "AIS_MT"; a
 # hipFile batch engine mirroring "GDS" slots in alongside it later.
 
-rocm_ais_path_opt = get_option('rocm_ais_path')
-if rocm_ais_path_opt == ''
-    rocm_path = run_command('bash', '-c', 'echo ${ROCM_PATH:-$ROCM_HOME}', check: false).stdout().strip()
-    if rocm_path == ''
-        rocm_path = '/opt/rocm'
-    endif
-    hipfile_search_dirs = [rocm_path, '/opt/rocs-ais', '/usr/local']
-    hipfile_lib_found = false
-    cc_local = meson.get_compiler('cpp')
-    foreach search_dir : hipfile_search_dirs
-        hipfile_lib_candidate = search_dir + '/lib'
-        hipfile_inc_candidate = search_dir + '/include'
-        if fs.exists(hipfile_lib_candidate) and fs.exists(hipfile_inc_candidate)
-            hipfile_lib_check = cc_local.find_library('hipfile',
-                dirs: [hipfile_lib_candidate], required: false)
-            if hipfile_lib_check.found()
-                hipfile_dep = declare_dependency(
-                    link_args: ['-L' + hipfile_lib_candidate, '-lhipfile',
-                                '-Wl,-rpath,' + hipfile_lib_candidate],
-                    include_directories: include_directories(hipfile_inc_candidate))
-                hipfile_lib_found = true
-                message('Found hipFile at: ' + search_dir)
-                break
-            endif
-        endif
-    endforeach
-    if not hipfile_lib_found
-        hipfile_dep = declare_dependency()
-        subdir_done()
-    endif
-else
-    hipfile_lib_path = rocm_ais_path_opt + '/lib'
-    hipfile_inc_path = rocm_ais_path_opt + '/include'
-    hipfile_dep = declare_dependency(
-        link_args: ['-L' + hipfile_lib_path, '-lhipfile',
-                    '-Wl,-rpath,' + hipfile_lib_path],
-        include_directories: include_directories(hipfile_inc_path))
-endif
-
 # hipFile calls are issued against HIP device memory, so the HIP runtime is
-# required even for the registration-only paths.
+# required even for the registration-only paths. hip_dep also fixes the prefix
+# (rocm_path / $ROCM_PATH), and hipFile ships inside the ROCm install, so look
+# for it there rather than resolving a prefix again.
 if not hip_dep.found()
     subdir_done()
 endif
+
+hipfile_lib_path = rocm_path + '/lib'
+hipfile_lib_check = cpp.find_library('hipfile', dirs: [hipfile_lib_path], required: false)
+if not hipfile_lib_check.found() or not cpp.has_header('hipfile.h', include_directories : hip_inc)
+    subdir_done()
+endif
+hipfile_dep = declare_dependency(
+    link_args: ['-L' + hipfile_lib_path, '-lhipfile',
+                '-Wl,-rpath,' + hipfile_lib_path],
+    include_directories: include_directories(rocm_path + '/include'))
+message('Found hipFile at: ' + rocm_path)
 
 ais_common_incs = [nixl_inc_dirs, utils_inc_dirs]
 # Shared engine deps exclude TaskFlow because the common registration and
